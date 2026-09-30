@@ -1,6 +1,18 @@
 # FlowDesk Live — v1.6 Worker Liveness & Operational Readiness
 
-FlowDesk now contains three coherent runtime boundaries:
+FlowDesk Live is a production-oriented commerce operations backend focused on reliable live-selling workflows: buyer intent capture, inventory-safe reservations, payment checkout, webhook ingestion, seller events, worker liveness, and operational readiness.
+
+## Portfolio highlights
+
+- PostgreSQL-authoritative transaction and reservation lifecycle
+- Fastify 5 API boundary with structured error handling and security controls
+- Paystack checkout and signed webhook verification
+- WhatsApp provider ingress and durable webhook inbox processing
+- Redis-backed seller-event delivery support
+- Idempotency, inventory-version preconditions, lifecycle outbox, and worker heartbeat checks
+- Executable regression evidence across transaction core, client freshness runtime, and API service
+
+## Runtime boundaries
 
 1. `transaction-core/`
    - PostgreSQL transaction authority through C01–C12
@@ -64,3 +76,10 @@ See `20_provider_processing_qa.md`. Current local executable contracts: 102 pass
 
 ## v1.6 worker liveness
 Critical asynchronous workers now have executable entrypoints and PostgreSQL-backed liveness heartbeats. `/readyz` fails closed when a required worker disappears even with an empty queue. See `24_worker_liveness_qa.md`.
+
+
+## Author
+
+**Godson Okutu**  
+Backend-focused software developer based in Ghana  
+Portfolio: [godsonokutu.dev](https://godsonokutu.dev)
