@@ -1,0 +1,24 @@
+{
+  "name": "@flowdesk/api-service",
+  "version": "0.6.0",
+  "private": true,
+  "description": "FlowDesk Live authenticated Fastify 5 application edge and durable webhook ingress.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node --check src/security/auth-context.js && node --check src/security/webhook-signatures.js && node --check src/security/request-guards.js && node --check src/security/route-guards.js && node --check src/http/problem.js && node --check src/services/authorization.pg.js && node --check src/services/webhook-endpoints.pg.js && node --check src/services/webhook-inbox.pg.js && node --check src/routes/transaction.routes.js && node --check src/routes/operations.routes.js && node --check src/routes/webhook.routes.js && node --check src/config/load-config.js && node --check src/build-app.js && node --check src/server.js && node --check src/providers/errors.js && node --check src/providers/paystack.js && node --check src/providers/whatsapp.js && node --check src/services/payment-intents.pg.js && node --check src/services/whatsapp-intents.pg.js && node --check src/services/seller-events.pg.js && node --check src/workers/webhook-inbox.worker.js && node --check src/services/live-offers.pg.js && node --check src/services/buyer-intent-review.pg.js && node --check src/services/webhook-health.pg.js && node --check src/routes/control-plane.routes.js && node --check bin/webhook-worker.js && node --check src/services/redis-seller-events.js && node --check src/workers/seller-event.publisher.pg.js && node --check src/routes/realtime.routes.js && node --check src/providers/paystack-checkout.js && node --check src/services/payment-checkout.pg.js && node --check src/workers/payment-provider.worker.pg.js && node --check src/routes/payment.routes.js && node --check src/services/system-readiness.pg.js && node --check src/services/worker-heartbeat.pg.js && node --check bin/payment-provider-worker.js && node --check bin/seller-event-publisher.js",
+    "test": "node --test test/*.test.js",
+    "start": "node src/server.js",
+    "worker:webhooks": "node bin/webhook-worker.js",
+    "worker:seller-events": "node bin/seller-event-publisher.js",
+    "worker:payments": "node bin/payment-provider-worker.js"
+  },
+  "dependencies": {
+    "@fastify/jwt": "10.2.2",
+    "@fastify/rate-limit": "11.2.0",
+    "fastify": "5.12.5",
+    "pg": "8.23.0",
+    "redis": "5.8.2"
+  }
+}

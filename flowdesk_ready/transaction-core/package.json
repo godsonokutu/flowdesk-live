@@ -1,0 +1,20 @@
+{
+  "name": "@flowdesk/transaction-core",
+  "version": "0.9.0",
+  "private": true,
+  "description": "FlowDesk Live PostgreSQL transaction authority through C12 deterministic LIVE-session shutdown.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "check": "node --check src/inventory.version-precondition.js && node --check src/seller-mutation.precondition.js && node --check src/reservation.pg.js && node --check src/reservation.variant.pg.js && node --check src/reservation.override.pg.js && node --check src/reservation.lifecycle.pg.js && node --check src/live-session.shutdown.pg.js && node --check src/lifecycle.outbox.pg.js && node --check src/lifecycle.operations.pg.js && node --check bin/lifecycle-worker.js",
+    "test": "node --test test/*.contract.test.js",
+    "test:integration": "node --test test/postgres.release-gates.integration.test.js",
+    "test:all": "npm run check && npm test && npm run test:integration",
+    "db:migrate": "node scripts/migrate.js",
+    "worker": "node bin/lifecycle-worker.js"
+  },
+  "dependencies": {
+    "pg": "8.23.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "name": "@flowdesk/client-safety",
+  "version": "0.1.0",
+  "private": true,
+  "engines": {"node": ">=22"},
+  "scripts": {
+    "check": "node --check src/stock-freshness.guard.js && node --check test/stock-freshness.guard.test.js",
+    "test": "node --test test/*.test.js"
+  }
+}

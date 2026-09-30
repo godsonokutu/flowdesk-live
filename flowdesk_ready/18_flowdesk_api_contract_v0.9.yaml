@@ -1,0 +1,1374 @@
+openapi: 3.1.0
+info:
+  title: FlowDesk Live Transaction API
+  version: 0.9.0
+  description: FlowDesk Live transaction and application-edge contract. PostgreSQL
+    remains the durable transaction authority. The API edge uses verify-only asymmetric
+    JWT authentication, database-authoritative merchant permissions, fresh step-up
+    verification for privileged actions, opaque tenant-scoped webhook endpoint keys,
+    provider HMAC verification over exact raw bytes, and a durable webhook inbox before
+    provider acknowledgement.
+security:
+- bearerAuth: []
+tags:
+- name: Readiness
+- name: Live Sessions
+- name: Buyer Intents
+- name: Reservations
+- name: Waitlist
+- name: Reconciliation
+- name: Overrides
+- name: Telemetry
+- name: Provider Webhooks
+- name: Operations
+paths:
+  /v1/merchant/readiness:
+    get:
+      tags:
+      - Readiness
+      summary: Get merchant pilot readiness
+      operationId: getMerchantReadiness
+      responses:
+        '200':
+          description: Current readiness state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MerchantReadiness'
+  /v1/live-sessions:
+    post:
+      tags:
+      - Live Sessions
+      summary: Create a draft LIVE session
+      operationId: createLiveSession
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLiveSessionRequest'
+      responses:
+        '201':
+          description: Draft session created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSession'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/live-sessions/{sessionId}/preflight:
+    post:
+      tags:
+      - Live Sessions
+      summary: Execute authoritative go-live checks
+      operationId: runLiveSessionPreflight
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Preflight result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PreflightResult'
+  /v1/live-sessions/{sessionId}/start:
+    post:
+      tags:
+      - Live Sessions
+      summary: Start a LIVE session after a passing preflight
+      operationId: startLiveSession
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required:
+              - preflight_token
+              properties:
+                preflight_token:
+                  type: string
+                  description: Short-lived token issued by a passing preflight.
+      responses:
+        '200':
+          description: Session transitioned to live
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LiveSession'
+        '422':
+          description: Readiness or preflight no longer passes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/live-sessions/{sessionId}/shutdown:
+    post:
+      tags:
+      - Live Sessions
+      summary: Begin deterministic LIVE-session shutdown
+      operationId: beginLiveSessionShutdown
+      description: Acquires the LIVE-session shutdown cut-over, transitions live ->
+        closing, cancels all waiting entries, and prevents new buyer intents/variant
+        switches. Existing active/payment-pending reservations keep their original
+        server-authoritative expiries and may still settle valid payment before expiry.
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BeginSessionShutdownRequest'
+      responses:
+        '202':
+          description: Session is closing and draining existing holds
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionShutdownState'
+        '200':
+          description: Session had already ended
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionShutdownState'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/live-sessions/{sessionId}/shutdown/finalize:
+    post:
+      tags:
+      - Live Sessions
+      summary: Finalize a closing LIVE session when all remaining holds are terminal
+      operationId: finalizeLiveSessionShutdown
+      description: Returns draining while any active/payment-pending reservation still
+        has a future server-authoritative expiry. Once all such holds are due, their
+        reserved inventory is released transactionally, waiting entries are verified
+        absent, and the session transitions closing -> ended. Repeated calls after
+        end are safe.
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              properties:
+                reason:
+                  type: string
+                  minLength: 8
+                  maxLength: 500
+      responses:
+        '200':
+          description: Draining, ended, or already-ended state
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SessionShutdownState'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/live-sessions/{sessionId}/buyer-intents:
+    post:
+      tags:
+      - Buyer Intents
+      summary: Accept a buyer intent and atomically attempt reservation
+      operationId: acceptBuyerIntent
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BuyerIntentRequest'
+      responses:
+        '201':
+          description: Intent accepted; reservation or waitlist result returned
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BuyerIntentResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/reservations/{reservationId}/cancel:
+    post:
+      tags:
+      - Reservations
+      summary: Cancel an active reservation and release stock exactly once
+      operationId: cancelReservation
+      parameters:
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '200':
+          description: Reservation cancellation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/waitlist/{waitlistEntryId}/promote:
+    post:
+      tags:
+      - Waitlist
+      summary: Promote the next eligible waitlist entry with a fresh server TTL
+      operationId: promoteWaitlistEntry
+      parameters:
+      - $ref: '#/components/parameters/WaitlistEntryId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      responses:
+        '201':
+          description: Fresh reservation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/reconciliations/{reservationId}/resolve:
+    post:
+      tags:
+      - Reconciliation
+      summary: Resolve a late-payment reconciliation case without stealing allocated
+        stock
+      operationId: resolveReconciliation
+      parameters:
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReconciliationResolutionRequest'
+      responses:
+        '200':
+          description: Reconciliation resolved and audited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/operator-overrides/force-allocation:
+    post:
+      tags:
+      - Overrides
+      summary: Privileged audited force-allocation with commit-time stock recheck
+      operationId: forceAllocationOverride
+      x-flowdesk-permission: reservation.force_allocate
+      x-flowdesk-step-up-max-age-seconds: 600
+      description: A force allocation bypasses normal queue policy only; it never
+        bypasses authoritative stock. The request must carry If-Inventory-Version
+        from a fresh client snapshot. The server locks the inventory row, compares
+        that version, rechecks available quantity, and only then may create the reservation.
+        Successful mutation and audit event commit atomically.
+      parameters:
+      - $ref: '#/components/parameters/IdempotencyKey'
+      - $ref: '#/components/parameters/InventoryVersion'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ForceAllocationRequest'
+      responses:
+        '201':
+          description: Override committed and audited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Reservation'
+        '403':
+          description: Actor lacks privileged role or step-up authorization
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '428':
+          description: If-Inventory-Version is missing
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/live-sessions/{sessionId}/telemetry:
+    get:
+      tags:
+      - Telemetry
+      summary: Get operational and pilot-safety telemetry
+      operationId: getLiveSessionTelemetry
+      parameters:
+      - $ref: '#/components/parameters/SessionId'
+      responses:
+        '200':
+          description: Aggregated telemetry read model
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PilotTelemetry'
+  /v1/webhooks/whatsapp/{endpointKey}:
+    post:
+      security: []
+      tags:
+      - Provider Webhooks
+      summary: Receive and durably acknowledge authenticated Meta WhatsApp webhooks
+      description: Resolve the merchant from an opaque endpoint key, load the app
+        secret through the configured secret-manager reference, verify X-Hub-Signature-256
+        as HMAC SHA-256 over the exact raw request bytes, then persist the deduplicated
+        payload to webhook_inbox before returning HTTP 200. Invalid signatures must
+        create no inbox row and invoke no transaction service.
+      parameters:
+      - $ref: '#/components/parameters/WebhookEndpointKey'
+      - name: x-hub-signature-256
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 512
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Signature verified and payload durably accepted or deduplicated
+        '401':
+          description: Provider signature invalid
+        '404':
+          description: Opaque endpoint key not found, disabled, or provider-mismatched
+        '503':
+          description: Signing secret or durable inbox temporarily unavailable
+  /v1/webhooks/payments/{endpointKey}:
+    post:
+      security: []
+      tags:
+      - Provider Webhooks
+      summary: Receive and durably acknowledge authenticated Paystack webhooks
+      description: Resolve the merchant from an opaque endpoint key, load the signing
+        secret through the configured secret-manager reference, verify x-paystack-signature
+        as HMAC SHA-512 over the exact raw request bytes, then persist the deduplicated
+        payload to webhook_inbox before returning HTTP 200. Invalid signatures must
+        create no inbox row and invoke no transaction service.
+      parameters:
+      - $ref: '#/components/parameters/WebhookEndpointKey'
+      - name: x-paystack-signature
+        in: header
+        required: true
+        schema:
+          type: string
+          minLength: 16
+          maxLength: 512
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+      responses:
+        '200':
+          description: Signature verified and payload durably accepted or deduplicated
+        '401':
+          description: Provider signature invalid
+        '404':
+          description: Opaque endpoint key not found, disabled, or provider-mismatched
+        '503':
+          description: Signing secret or durable inbox temporarily unavailable
+  /v1/operations/lifecycle/health:
+    get:
+      tags:
+      - Operations
+      summary: Read lifecycle worker health and backlog safety signals
+      operationId: getLifecycleHealth
+      x-flowdesk-permission: lifecycle.health.read
+      responses:
+        '200':
+          description: Lifecycle worker health summary
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LifecycleHealth'
+        '403':
+          description: Actor lacks lifecycle health permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/operations/lifecycle/dead-letters:
+    get:
+      tags:
+      - Operations
+      summary: List immutable lifecycle dead-letter events for operator review
+      operationId: listLifecycleDeadLetters
+      x-flowdesk-permission: lifecycle.dead_letter.read
+      parameters:
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          minimum: 1
+          maximum: 100
+          default: 50
+      - name: before_created_at
+        in: query
+        required: false
+        schema:
+          type: string
+          format: date-time
+      responses:
+        '200':
+          description: Dead-letter page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required:
+                - items
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/LifecycleDeadLetter'
+        '403':
+          description: Actor lacks dead-letter read permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+  /v1/operations/lifecycle/dead-letters/{outboxId}/replay:
+    post:
+      tags:
+      - Operations
+      summary: Queue an audited replay of an immutable dead-letter event
+      operationId: replayLifecycleDeadLetter
+      x-flowdesk-permission: lifecycle.dead_letter.replay
+      parameters:
+      - name: outboxId
+        in: path
+        required: true
+        schema:
+          type: string
+          format: uuid
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LifecycleReplayRequest'
+      responses:
+        '202':
+          description: Original immutable event queued for replay; operator action
+            audited
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LifecycleReplayResult'
+        '403':
+          description: Actor lacks replay permission
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '409':
+          $ref: '#/components/responses/Conflict'
+  /v1/reservations/{reservationId}/switch-variant:
+    post:
+      tags:
+      - Reservations
+      summary: Atomically move an active reservation to another inventory variant
+      operationId: switchReservationVariant
+      description: Locks the reservation first, then locks source and destination
+        inventory rows in deterministic ID order. Source inventory is released only
+        if destination inventory can be claimed in the same transaction. On failure,
+        the original reservation remains unchanged. A successful switch writes an
+        immutable audit event and queues source-stock waitlist work before COMMIT.
+      parameters:
+      - $ref: '#/components/parameters/ReservationId'
+      - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/VariantSwitchRequest'
+      responses:
+        '200':
+          description: Variant switch committed or idempotent no-change
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/VariantSwitchResult'
+        '409':
+          $ref: '#/components/responses/Conflict'
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+        minLength: 16
+        maxLength: 200
+      description: Merchant-scoped mutation key. Same key + same payload returns the
+        original result; same key + different payload is a conflict.
+    SessionId:
+      name: sessionId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    ReservationId:
+      name: reservationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    WaitlistEntryId:
+      name: waitlistEntryId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    InventoryVersion:
+      name: If-Inventory-Version
+      in: header
+      required: true
+      schema:
+        type: integer
+        format: int64
+        minimum: 0
+      description: Version from the seller client's fresh, session/SKU-scoped authoritative
+        stock snapshot. The server locks the inventory row and rejects a mismatch
+        before any reservation or audit mutation.
+    WebhookEndpointKey:
+      name: endpointKey
+      in: path
+      required: true
+      schema:
+        type: string
+        minLength: 24
+        maxLength: 96
+        pattern: ^[A-Za-z0-9_-]+$
+      description: Opaque routing identity used to resolve one configured merchant/provider
+        webhook endpoint. It is not a signing secret.
+  responses:
+    Conflict:
+      description: Current authoritative state prevents the requested mutation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+  schemas:
+    Error:
+      type: object
+      additionalProperties: false
+      required:
+      - code
+      - message
+      - request_id
+      properties:
+        code:
+          type: string
+          enum:
+          - INVENTORY_UNAVAILABLE
+          - STALE_INVENTORY_VERSION
+          - IDEMPOTENCY_KEY_REUSED_WITH_DIFFERENT_PAYLOAD
+          - RESERVATION_ALREADY_TERMINAL
+          - WAITLIST_ENTRY_NOT_ELIGIBLE
+          - SESSION_NOT_LIVE
+          - PREFLIGHT_FAILED
+          - RECONCILIATION_REQUIRED
+          - FORBIDDEN_OVERRIDE
+          - INVENTORY_VERSION_REQUIRED
+          - INVALID_INVENTORY_VERSION
+          - DESTINATION_VARIANT_UNAVAILABLE
+          - DESTINATION_OWNERSHIP_CONFLICT
+          - SOURCE_INVENTORY_NOT_FOUND
+          - DESTINATION_INVENTORY_NOT_FOUND
+        message:
+          type: string
+        request_id:
+          type: string
+        current_inventory_version:
+          type: integer
+          format: int64
+    MerchantReadiness:
+      type: object
+      additionalProperties: false
+      required:
+      - ready_for_pilot
+      - checks
+      - evaluated_at
+      properties:
+        ready_for_pilot:
+          type: boolean
+        evaluated_at:
+          type: string
+          format: date-time
+        checks:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - key
+            - status
+            properties:
+              key:
+                type: string
+                enum:
+                - whatsapp_ingress
+                - payment_webhook
+                - inventory_authority
+                - operator_roles
+                - audit_trail
+                - load_test
+              status:
+                type: string
+                enum:
+                - pass
+                - fail
+                - pending
+              detail:
+                type: string
+    CreateLiveSessionRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - name
+      - reservation_ttl_seconds
+      - late_payment_policy
+      - waitlist_policy
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        reservation_ttl_seconds:
+          type: integer
+          minimum: 60
+          maximum: 1800
+        late_payment_policy:
+          type: string
+          enum:
+          - reconciliation_required
+        waitlist_policy:
+          type: string
+          enum:
+          - fifo_server_received_at
+    LiveSession:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - merchant_id
+      - name
+      - status
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        merchant_id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        status:
+          type: string
+          enum:
+          - draft
+          - live
+          - closing
+          - ended
+          - cancelled
+        started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        closing_started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        close_policy:
+          type:
+          - string
+          - 'null'
+          enum:
+          - drain_holds
+          - null
+    PreflightResult:
+      type: object
+      additionalProperties: false
+      required:
+      - passed
+      - checks
+      - evaluated_at
+      properties:
+        passed:
+          type: boolean
+        evaluated_at:
+          type: string
+          format: date-time
+        preflight_token:
+          type:
+          - string
+          - 'null'
+          description: Present only when passed=true; short lived and bound to the
+            evaluated session/config version.
+        checks:
+          type: array
+          items:
+            type: object
+            required:
+            - key
+            - status
+            properties:
+              key:
+                type: string
+              status:
+                type: string
+                enum:
+                - pass
+                - fail
+              detail:
+                type: string
+    BuyerIntentRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - provider
+      - provider_event_id
+      - buyer_id
+      - inventory_variant_id
+      - quantity
+      properties:
+        provider:
+          type: string
+          enum:
+          - whatsapp
+        provider_event_id:
+          type: string
+          minLength: 1
+          maxLength: 255
+        buyer_id:
+          type: string
+          format: uuid
+        inventory_variant_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100
+    BuyerIntentResult:
+      type: object
+      additionalProperties: false
+      required:
+      - outcome
+      - server_time
+      - inventory_version
+      properties:
+        outcome:
+          type: string
+          enum:
+          - reserved
+          - waitlisted
+          - unavailable
+        server_time:
+          type: string
+          format: date-time
+        inventory_version:
+          type: integer
+          format: int64
+        reservation:
+          oneOf:
+          - $ref: '#/components/schemas/Reservation'
+          - type: 'null'
+        waitlist_entry_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+    Reservation:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - live_session_id
+      - inventory_variant_id
+      - buyer_id
+      - quantity
+      - status
+      - expires_at
+      - created_at
+      - updated_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        live_session_id:
+          type: string
+          format: uuid
+        inventory_variant_id:
+          type: string
+          format: uuid
+        buyer_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        status:
+          type: string
+          enum:
+          - active
+          - payment_pending
+          - paid
+          - expired
+          - cancelled
+          - reconciliation_required
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+    ReconciliationResolutionRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - resolution
+      - reason
+      properties:
+        resolution:
+          type: string
+          enum:
+          - refund
+          - substitute_variant
+          - allocate_newly_available_stock
+        substitute_inventory_variant_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 1000
+    ForceAllocationRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - live_session_id
+      - inventory_variant_id
+      - buyer_id
+      - quantity
+      - reason
+      - step_up_token
+      properties:
+        live_session_id:
+          type: string
+          format: uuid
+        inventory_variant_id:
+          type: string
+          format: uuid
+        buyer_id:
+          type: string
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 1000
+        step_up_token:
+          type: string
+          minLength: 16
+    PilotTelemetry:
+      type: object
+      additionalProperties: false
+      required:
+      - session_id
+      - window
+      - metrics
+      - safety_gates
+      properties:
+        session_id:
+          type: string
+          format: uuid
+        window:
+          type: object
+          required:
+          - from
+          - to
+          properties:
+            from:
+              type: string
+              format: date-time
+            to:
+              type: string
+              format: date-time
+        metrics:
+          type: object
+          additionalProperties: false
+          required:
+          - buyer_intents_received
+          - reservation_attempts
+          - confirmed_holds
+          - paid_orders
+          - waitlist_promotions
+          - duplicate_events_blocked
+          - oversell_events
+          - late_payment_reconciliations
+          - reservation_commit_p95_ms
+          properties:
+            buyer_intents_received:
+              type: integer
+              minimum: 0
+            reservation_attempts:
+              type: integer
+              minimum: 0
+            confirmed_holds:
+              type: integer
+              minimum: 0
+            paid_orders:
+              type: integer
+              minimum: 0
+            waitlist_promotions:
+              type: integer
+              minimum: 0
+            duplicate_events_blocked:
+              type: integer
+              minimum: 0
+            oversell_events:
+              type: integer
+              minimum: 0
+            late_payment_reconciliations:
+              type: integer
+              minimum: 0
+            reservation_commit_p95_ms:
+              type: number
+              minimum: 0
+        safety_gates:
+          type: array
+          items:
+            type: object
+            required:
+            - key
+            - status
+            properties:
+              key:
+                type: string
+              status:
+                type: string
+                enum:
+                - pass
+                - fail
+                - watch
+              value: {}
+              threshold: {}
+    LifecycleHealth:
+      type: object
+      additionalProperties: false
+      required:
+      - pending_count
+      - dead_letter_count
+      - retrying_count
+      - last_24h
+      properties:
+        pending_count:
+          type: integer
+          minimum: 0
+        dead_letter_count:
+          type: integer
+          minimum: 0
+        retrying_count:
+          type: integer
+          minimum: 0
+        oldest_pending_age_seconds:
+          type:
+          - number
+          - 'null'
+          minimum: 0
+        last_completed_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_24h:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required:
+            - event_type
+            - status
+            - count
+            properties:
+              event_type:
+                type: string
+              status:
+                type: string
+                enum:
+                - pending
+                - completed
+                - dead_letter
+              count:
+                type: integer
+                minimum: 0
+    LifecycleDeadLetter:
+      type: object
+      additionalProperties: false
+      required:
+      - id
+      - event_type
+      - source_type
+      - source_id
+      - live_session_id
+      - inventory_variant_id
+      - attempts
+      - payload
+      - created_at
+      properties:
+        id:
+          type: string
+          format: uuid
+        event_type:
+          type: string
+          enum:
+          - inventory_available
+        source_type:
+          type: string
+          enum:
+          - reservation_expiry
+          - late_payment_expiry
+          - reservation_cancel
+          - inventory_adjustment
+        source_id:
+          type: string
+          format: uuid
+        live_session_id:
+          type: string
+          format: uuid
+        inventory_variant_id:
+          type: string
+          format: uuid
+        attempts:
+          type: integer
+          minimum: 1
+        last_error:
+          type:
+          - string
+          - 'null'
+        payload:
+          type: object
+          description: Immutable original event payload; replay never accepts payload
+            replacement.
+        created_at:
+          type: string
+          format: date-time
+        available_at:
+          type: string
+          format: date-time
+    LifecycleReplayRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 500
+          description: Operator justification recorded in immutable audit history.
+    LifecycleReplayResult:
+      type: object
+      additionalProperties: false
+      required:
+      - outcome
+      - outbox_id
+      properties:
+        outcome:
+          type: string
+          enum:
+          - replay_queued
+        outbox_id:
+          type: string
+          format: uuid
+    VariantSwitchRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - destination_inventory_variant_id
+      - reason
+      properties:
+        destination_inventory_variant_id:
+          type: string
+          format: uuid
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 500
+          description: Human-readable buyer/operator intent captured in immutable
+            audit history.
+    VariantSwitchResult:
+      type: object
+      additionalProperties: false
+      required:
+      - outcome
+      - reservation_id
+      - quantity
+      properties:
+        outcome:
+          type: string
+          enum:
+          - switched
+          - no_change
+        reservation_id:
+          type: string
+          format: uuid
+        from_inventory_variant_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        to_inventory_variant_id:
+          type:
+          - string
+          - 'null'
+          format: uuid
+        quantity:
+          type: integer
+          minimum: 1
+        source_inventory_version:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        destination_inventory_version:
+          type:
+          - integer
+          - 'null'
+          format: int64
+        promotion_queued:
+          type:
+          - boolean
+          - 'null'
+    BeginSessionShutdownRequest:
+      type: object
+      additionalProperties: false
+      required:
+      - reason
+      properties:
+        reason:
+          type: string
+          minLength: 8
+          maxLength: 500
+    SessionShutdownState:
+      type: object
+      additionalProperties: false
+      required:
+      - outcome
+      - session_id
+      - status
+      properties:
+        outcome:
+          type: string
+          enum:
+          - closing
+          - draining
+          - ended
+          - already_ended
+        session_id:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum:
+          - closing
+          - ended
+        policy:
+          type:
+          - string
+          - 'null'
+          enum:
+          - drain_holds
+          - null
+        closing_started_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        ended_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        active_hold_count:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        cancelled_waitlist_count:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        expired_reservation_count:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        released_quantity:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+        next_expiry_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        last_expiry_at:
+          type:
+          - string
+          - 'null'
+          format: date-time
+        pending_lifecycle_jobs:
+          type:
+          - integer
+          - 'null'
+          minimum: 0
+x-flowdesk-invariants:
+- available_stock_never_negative
+- one_unit_has_at_most_one_active_reservation_owner
+- provider_callbacks_and_ingress_are_idempotent
+- late_payment_never_silently_resurrects_expired_stock
+- privileged_override_requires_actor_reason_and_immutable_audit_event
+- server_time_is_authoritative_for_expiry
+- provider_retries_never_duplicate_reservations_or_orders
+- Lifecycle stock-release work is inserted before the same commit that makes inventory
+  available.
+- Dead-letter replay never changes the original payload/source identity and requires
+  authorization plus an audit reason.
+- SKIP LOCKED is allowed for independent outbox jobs, never for strict-FIFO buyer
+  selection.
+- Variant switching releases source inventory only in the same transaction that successfully
+  claims destination inventory; failure preserves the original reservation.
+x-flowdesk-c09-stock-freshness:
+  max-snapshot-age-ms: 15000
+  max-server-ack-age-ms: 10000
+  reconnect-policy: Reconnect increments connection generation and invalidates all
+    pre-reconnect stock snapshots.
+  mutation-policy: Stock-affecting seller actions carry If-Inventory-Version from
+    a fresh scoped snapshot; server must still recheck authoritative inventory transactionally.
+  offline-policy: Offline or disconnected clients may display last-known stock only
+    as stale and must not promise availability.
+  server-enforcement: Seller stock mutations reject missing version with 428 and stale
+    version with 409 after locking the inventory row; no reservation or audit side
+    effect may occur on failure.
+x-flowdesk-c11-variant-switch:
+  lock-order: reservation row first; source + destination inventory rows ordered by
+    inventory id
+  failure-policy: rollback all source/destination/reservation changes and preserve
+    original hold
+  success-policy: same reservation identity moves to destination; source release emits
+    durable inventory_available/variant_switch outbox work
+  waitlist-policy: released source stock is handled by the existing strict-FIFO lifecycle
+    worker
+x-flowdesk-c12-session-shutdown:
+  cutover: live -> closing is the authoritative boundary; operations requiring a live
+    session fail after the cut-over commit
+  waitlist_policy: all waiting entries are cancelled at cut-over; lifecycle workers
+    treat closing/ended sessions as non-live and never promote
+  hold_policy: existing active/payment-pending reservations keep their original server-authoritative
+    expiry and may settle valid payment before expiry
+  finalization: closing -> ended only after zero active/payment-pending holds and
+    zero waiting entries; due holds release reserved inventory transactionally
+  lock_order: finalization locks active reservation rows ordered by id, then the session
+    row, then inventory rows ordered by id
+  audit: shutdown_started and ended transitions record operator identity, reason,
+    counts and lifecycle policy
+x-flowdesk-api-edge:
+  runtime: Node.js 22+ / Fastify 5.12.5
+  jwt:
+    mode: verify-only asymmetric
+    algorithm: RS256
+    tenant_source: verified merchant_id claim
+    issuer_and_audience: pinned by deployment configuration
+  authorization:
+    source_of_truth: PostgreSQL merchant_memberships + merchant_permissions
+    token_permissions: informational only; privileged permission is rechecked server-side
+    step_up_max_age_seconds: 600
+  webhooks:
+    tenant_routing: opaque endpoint key
+    secret_storage: secret_ref only; raw signing secrets are not stored in FlowDesk
+      relational tables
+    paystack: HMAC SHA-512 over exact raw bytes
+    meta_whatsapp: HMAC SHA-256 over exact raw bytes
+    ack_policy: return success only after durable webhook_inbox insert or dedupe acknowledgement
+  logging:
+    redact:
+    - authorization
+    - cookie
+    - x-paystack-signature
+    - x-hub-signature-256
+    server_error_policy: 5xx responses do not expose internal exception text
+  rate_limit:
+    route_local_backstop: true
+    multi_replica_production: startup requires attestation that a distributed edge
+      rate limiter is enabled
+x-flowdesk-webhook-inbox:
+  states:
+  - received
+  - processing
+  - processed
+  - dead_letter
+  dedupe_scope: webhook_endpoint_id + provider_event_id
+  payload_integrity: SHA-256 of exact raw request bytes
+  processing_model: at-least-once worker; downstream transaction services remain idempotent

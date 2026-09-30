@@ -1,0 +1,401 @@
+=== TRANSACTION CORE CHECK ===
+
+> @flowdesk/transaction-core@0.9.0 check
+> node --check src/inventory.version-precondition.js && node --check src/seller-mutation.precondition.js && node --check src/reservation.pg.js && node --check src/reservation.variant.pg.js && node --check src/reservation.override.pg.js && node --check src/reservation.lifecycle.pg.js && node --check src/live-session.shutdown.pg.js && node --check src/lifecycle.outbox.pg.js && node --check src/lifecycle.operations.pg.js && node --check bin/lifecycle-worker.js
+
+
+=== TRANSACTION CORE CONTRACTS ===
+
+> @flowdesk/transaction-core@0.9.0 test
+> node --test test/*.contract.test.js
+
+TAP version 13
+# Subtest: C09 inventory version accepts canonical non-negative integer header
+ok 1 - C09 inventory version accepts canonical non-negative integer header
+  ---
+  duration_ms: 1.056691
+  type: 'test'
+  ...
+# Subtest: C09 missing inventory version fails closed with HTTP 428 semantics
+ok 2 - C09 missing inventory version fails closed with HTTP 428 semantics
+  ---
+  duration_ms: 0.344539
+  type: 'test'
+  ...
+# Subtest: C09 malformed inventory version is rejected
+ok 3 - C09 malformed inventory version is rejected
+  ---
+  duration_ms: 0.165279
+  type: 'test'
+  ...
+# Subtest: C09 authoritative version mismatch is a stale-state conflict
+ok 4 - C09 authoritative version mismatch is a stale-state conflict
+  ---
+  duration_ms: 0.230748
+  type: 'test'
+  ...
+# Subtest: valid payment converts reserved stock to sold and persists result before commit
+ok 5 - valid payment converts reserved stock to sold and persists result before commit
+  ---
+  duration_ms: 1.860402
+  type: 'test'
+  ...
+# Subtest: payment retry is payload-bound, not transaction-id-only
+ok 6 - payment retry is payload-bound, not transaction-id-only
+  ---
+  duration_ms: 0.412651
+  type: 'test'
+  ...
+# Subtest: reusing provider transaction id with changed amount is rejected
+ok 7 - reusing provider transaction id with changed amount is rejected
+  ---
+  duration_ms: 0.679643
+  type: 'test'
+  ...
+# Subtest: late payment after TTL releases hold and queues waitlist work before COMMIT
+ok 8 - late payment after TTL releases hold and queues waitlist work before COMMIT
+  ---
+  duration_ms: 1.685709
+  type: 'test'
+  ...
+# Subtest: payment after already-expired reservation enters reconciliation without touching inventory
+ok 9 - payment after already-expired reservation enters reconciliation without touching inventory
+  ---
+  duration_ms: 0.335505
+  type: 'test'
+  ...
+# Subtest: expiry and cancellation both release stock through the durable outbox boundary
+ok 10 - expiry and cancellation both release stock through the durable outbox boundary
+  ---
+  duration_ms: 1.168469
+  type: 'test'
+  ...
+# Subtest: health read requires explicit permission before DB access
+ok 11 - health read requires explicit permission before DB access
+  ---
+  duration_ms: 1.84675
+  type: 'test'
+  ...
+# Subtest: health summary exposes backlog and dead-letter safety signals
+ok 12 - health summary exposes backlog and dead-letter safety signals
+  ---
+  duration_ms: 1.319026
+  type: 'test'
+  ...
+# Subtest: dead-letter replay preserves immutable payload and writes audit event
+ok 13 - dead-letter replay preserves immutable payload and writes audit event
+  ---
+  duration_ms: 0.714255
+  type: 'test'
+  ...
+# Subtest: replay rejects non-dead-letter event and rolls back
+ok 14 - replay rejects non-dead-letter event and rolls back
+  ---
+  duration_ms: 1.552468
+  type: 'test'
+  ...
+# Subtest: short replay reason is rejected before DB access
+ok 15 - short replay reason is rejected before DB access
+  ---
+  duration_ms: 1.086015
+  type: 'test'
+  ...
+# Subtest: outbox enqueue requires immutable source identity before DB access
+ok 16 - outbox enqueue requires immutable source identity before DB access
+  ---
+  duration_ms: 1.338496
+  type: 'test'
+  ...
+# Subtest: worker job claim uses PostgreSQL-valid LIMIT then FOR UPDATE SKIP LOCKED ordering
+ok 17 - worker job claim uses PostgreSQL-valid LIMIT then FOR UPDATE SKIP LOCKED ordering
+  ---
+  duration_ms: 0.868408
+  type: 'test'
+  ...
+# Subtest: worker promotes strict FIFO quantities without buyer-level SKIP LOCKED
+ok 18 - worker promotes strict FIFO quantities without buyer-level SKIP LOCKED
+  ---
+  duration_ms: 1.292165
+  type: 'test'
+  ...
+# Subtest: strict FIFO blocks a later smaller buyer if head quantity does not fit
+ok 19 - strict FIFO blocks a later smaller buyer if head quantity does not fit
+  ---
+  duration_ms: 1.147418
+  type: 'test'
+  ...
+# Subtest: retryable SQL failure rolls back handler savepoint and schedules bounded retry
+ok 20 - retryable SQL failure rolls back handler savepoint and schedules bounded retry
+  ---
+  duration_ms: 0.382085
+  type: 'test'
+  ...
+# Subtest: retry classifier excludes uniqueness/domain conflicts from transient retry loop
+ok 21 - retry classifier excludes uniqueness/domain conflicts from transient retry loop
+  ---
+  duration_ms: 0.264178
+  type: 'test'
+  ...
+# Subtest: C08 rejects missing permission before DB access
+ok 22 - C08 rejects missing permission before DB access
+  ---
+  duration_ms: 1.347799
+  type: 'test'
+  ...
+# Subtest: C08 rejects expired step-up before DB access
+ok 23 - C08 rejects expired step-up before DB access
+  ---
+  duration_ms: 0.354854
+  type: 'test'
+  ...
+# Subtest: C09 privileged stock mutation requires an expected inventory version before DB access
+ok 24 - C09 privileged stock mutation requires an expected inventory version before DB access
+  ---
+  duration_ms: 0.20549
+  type: 'test'
+  ...
+# Subtest: C09 stale inventory version fails after row lock and before mutation
+ok 25 - C09 stale inventory version fails after row lock and before mutation
+  ---
+  duration_ms: 1.012895
+  type: 'test'
+  ...
+# Subtest: C08 force allocation rechecks authoritative stock and never permits negative inventory
+ok 26 - C08 force allocation rechecks authoritative stock and never permits negative inventory
+  ---
+  duration_ms: 0.592532
+  type: 'test'
+  ...
+# Subtest: C08 successful override reserves and audits in same transaction before commit
+ok 27 - C08 successful override reserves and audits in same transaction before commit
+  ---
+  duration_ms: 0.384789
+  type: 'test'
+  ...
+# Subtest: C09 expected inventory version is bound into idempotency request hash
+ok 28 - C09 expected inventory version is bound into idempotency request hash
+  ---
+  duration_ms: 0.749438
+  type: 'test'
+  ...
+# Subtest: stableHash is recursively canonical and deterministic
+ok 29 - stableHash is recursively canonical and deterministic
+  ---
+  duration_ms: 4.086213
+  type: 'test'
+  ...
+# Subtest: rejects malformed quantity before DB access
+ok 30 - rejects malformed quantity before DB access
+  ---
+  duration_ms: 0.670169
+  type: 'test'
+  ...
+# Subtest: waitlist preserves requested quantity and does not lock aggregate output
+ok 31 - waitlist preserves requested quantity and does not lock aggregate output
+  ---
+  duration_ms: 0.578732
+  type: 'test'
+  ...
+# Subtest: duplicate provider delivery returns original durable reservation instead of creating another
+ok 32 - duplicate provider delivery returns original durable reservation instead of creating another
+  ---
+  duration_ms: 0.314484
+  type: 'test'
+  ...
+# Subtest: guarded inventory claim rolls back when accounting predicate updates zero rows
+ok 33 - guarded inventory claim rolls back when accounting predicate updates zero rows
+  ---
+  duration_ms: 0.30562
+  type: 'test'
+  ...
+# Subtest: provider event id cannot be replayed with a changed buyer intent payload
+ok 34 - provider event id cannot be replayed with a changed buyer intent payload
+  ---
+  duration_ms: 0.231008
+  type: 'test'
+  ...
+# Subtest: C09 header extractor is case-insensitive for Node-style headers
+ok 35 - C09 header extractor is case-insensitive for Node-style headers
+  ---
+  duration_ms: 0.767766
+  type: 'test'
+  ...
+# Subtest: C09 header extractor accepts Headers-like adapters
+ok 36 - C09 header extractor accepts Headers-like adapters
+  ---
+  duration_ms: 0.182094
+  type: 'test'
+  ...
+# Subtest: C09 missing seller mutation precondition fails closed
+ok 37 - C09 missing seller mutation precondition fails closed
+  ---
+  duration_ms: 0.34485
+  type: 'test'
+  ...
+# Subtest: C12 invalid shutdown reason fails before DB access
+ok 38 - C12 invalid shutdown reason fails before DB access
+  ---
+  duration_ms: 1.415241
+  type: 'test'
+  ...
+# Subtest: C12 begin shutdown establishes closing cut-over, cancels waitlist and audits without mutating active reservations
+ok 39 - C12 begin shutdown establishes closing cut-over, cancels waitlist and audits without mutating active reservations
+  ---
+  duration_ms: 0.95641
+  type: 'test'
+  ...
+# Subtest: C12 begin shutdown replay returns stored result and does not create another shutdown audit
+ok 40 - C12 begin shutdown replay returns stored result and does not create another shutdown audit
+  ---
+  duration_ms: 0.390448
+  type: 'test'
+  ...
+# Subtest: C12 finalize returns draining while a valid pre-close hold remains and does not release inventory
+ok 41 - C12 finalize returns draining while a valid pre-close hold remains and does not release inventory
+  ---
+  duration_ms: 0.756669
+  type: 'test'
+  ...
+# Subtest: C12 finalization locks reservation -> session -> inventory, releases due holds, verifies zero orphans, then ends
+ok 42 - C12 finalization locks reservation -> session -> inventory, releases due holds, verifies zero orphans, then ends
+  ---
+  duration_ms: 0.402226
+  type: 'test'
+  ...
+# Subtest: C12 accounting conflict rolls back and never marks session ended
+ok 43 - C12 accounting conflict rolls back and never marks session ended
+  ---
+  duration_ms: 0.245761
+  type: 'test'
+  ...
+# Subtest: C12 lifecycle worker treats closing session as non-live and cannot promote waitlist
+ok 44 - C12 lifecycle worker treats closing session as non-live and cannot promote waitlist
+  ---
+  duration_ms: 0.481234
+  type: 'test'
+  ...
+# Subtest: C11 invalid switch input fails before DB access
+ok 45 - C11 invalid switch input fails before DB access
+  ---
+  duration_ms: 3.073487
+  type: 'test'
+  ...
+# Subtest: C11 unavailable destination leaves original reservation and inventory untouched
+ok 46 - C11 unavailable destination leaves original reservation and inventory untouched
+  ---
+  duration_ms: 1.237343
+  type: 'test'
+  ...
+# Subtest: C11 successful switch locks both inventory rows in deterministic order and commits source release + destination claim atomically
+ok 47 - C11 successful switch locks both inventory rows in deterministic order and commits source release + destination claim atomically
+  ---
+  duration_ms: 0.860736
+  type: 'test'
+  ...
+# Subtest: C11 source accounting mismatch rolls back before destination claim
+ok 48 - C11 source accounting mismatch rolls back before destination claim
+  ---
+  duration_ms: 0.643199
+  type: 'test'
+  ...
+# Subtest: C11 same destination is an idempotent no-op with no inventory mutation
+ok 49 - C11 same destination is an idempotent no-op with no inventory mutation
+  ---
+  duration_ms: 0.326952
+  type: 'test'
+  ...
+1..49
+# tests 49
+# suites 0
+# pass 49
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 194.291369
+
+=== POSTGRESQL RELEASE HARNESS ===
+
+> @flowdesk/transaction-core@0.9.0 test:integration
+> node --test test/postgres.release-gates.integration.test.js
+
+TAP version 13
+# Subtest: PostgreSQL integration release gate requires DATABASE_URL
+ok 1 - PostgreSQL integration release gate requires DATABASE_URL # SKIP
+  ---
+  duration_ms: 0.698231
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 0
+# fail 0
+# cancelled 0
+# skipped 1
+# todo 0
+# duration_ms 48.53778
+
+=== CLIENT FRESHNESS CONTRACTS ===
+
+> @flowdesk/client-safety@0.1.0 test
+> node --test test/*.test.js
+
+TAP version 13
+# Subtest: offline invalidates and blocks
+ok 1 - offline invalidates and blocks
+  ---
+  duration_ms: 1.240147
+  type: 'test'
+  ...
+# Subtest: reconnect requires new snapshot
+ok 2 - reconnect requires new snapshot
+  ---
+  duration_ms: 0.128734
+  type: 'test'
+  ...
+# Subtest: superseded generation rejected
+ok 3 - superseded generation rejected
+  ---
+  duration_ms: 0.28597
+  type: 'test'
+  ...
+# Subtest: expired snapshot blocks online client
+ok 4 - expired snapshot blocks online client
+  ---
+  duration_ms: 0.141393
+  type: 'test'
+  ...
+# Subtest: expired ack blocks promise
+ok 5 - expired ack blocks promise
+  ---
+  duration_ms: 0.106721
+  type: 'test'
+  ...
+# Subtest: fresh stock emits version headers
+ok 6 - fresh stock emits version headers
+  ---
+  duration_ms: 0.565
+  type: 'test'
+  ...
+# Subtest: scope mismatch blocked
+ok 7 - scope mismatch blocked
+  ---
+  duration_ms: 0.269055
+  type: 'test'
+  ...
+# Subtest: quantity cannot exceed fresh availability
+ok 8 - quantity cannot exceed fresh availability
+  ---
+  duration_ms: 0.134613
+  type: 'test'
+  ...
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 54.613003

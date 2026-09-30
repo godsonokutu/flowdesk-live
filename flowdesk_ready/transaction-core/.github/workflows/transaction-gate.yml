@@ -1,0 +1,52 @@
+name: FlowDesk transaction release gate
+
+on:
+  push:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "package*.json"
+      - ".github/workflows/transaction-gate.yml"
+  pull_request:
+    paths:
+      - "src/**"
+      - "test/**"
+      - "migrations/**"
+      - "scripts/**"
+      - "package*.json"
+      - ".github/workflows/transaction-gate.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  postgres-release-gates:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: flowdesk
+          POSTGRES_USER: flowdesk
+          POSTGRES_PASSWORD: flowdesk_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U flowdesk -d flowdesk"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://flowdesk:flowdesk_ci@127.0.0.1:5432/flowdesk
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm install --ignore-scripts --no-audit --no-fund
+      - run: npm run db:migrate
+      - run: npm run test:all

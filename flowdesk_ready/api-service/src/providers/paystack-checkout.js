@@ -1,0 +1,9 @@
+'use strict';
+class PaystackApiError extends Error{constructor(code,message,{status=502,retryable=true}={}){super(message);Object.assign(this,{code,status,retryable})}}
+function safeUrl(u){let x;try{x=new URL(u)}catch{throw new PaystackApiError('PAYSTACK_RESPONSE_INVALID','invalid authorization URL',{retryable:false})}if(x.protocol!=='https:'||x.hostname!=='checkout.paystack.com')throw new PaystackApiError('PAYSTACK_RESPONSE_INVALID','unexpected authorization URL',{retryable:false});return x.toString()}
+class PaystackCheckoutAdapter{constructor({fetchImpl=globalThis.fetch,timeoutMs=8000}={}){this.fetch=fetchImpl;this.timeoutMs=timeoutMs}
+ async initialize({secretKey,email,amountMinor,currency,reference,callbackUrl,metadata}){const c=new AbortController(),t=setTimeout(()=>c.abort(),this.timeoutMs);let r;try{r=await this.fetch('https://api.paystack.co/transaction/initialize',{method:'POST',headers:{authorization:`Bearer ${secretKey}`,'content-type':'application/json'},body:JSON.stringify({email,amount:String(amountMinor),currency,reference,...(callbackUrl?{callback_url:callbackUrl}:{}),metadata:JSON.stringify(metadata||{})}),signal:c.signal})}catch(e){throw new PaystackApiError(e?.name==='AbortError'?'PAYSTACK_TIMEOUT':'PAYSTACK_NETWORK_ERROR','Paystack initialization request failed',{status:503,retryable:true})}finally{clearTimeout(t)}
+ let b;try{b=await r.json()}catch{}if(!r.ok||b?.status!==true)throw new PaystackApiError('PAYSTACK_INITIALIZE_FAILED','Paystack rejected initialization',{status:r.status>=500||r.status===429?503:422,retryable:r.status>=500||r.status===429});
+ if(b.data?.reference!==reference||!b.data?.access_code)throw new PaystackApiError('PAYSTACK_RESPONSE_INVALID','Paystack response correlation failed',{retryable:false});
+ return{reference,accessCode:b.data.access_code,authorizationUrl:safeUrl(b.data.authorization_url)}}}
+module.exports={PaystackCheckoutAdapter,PaystackApiError,safeUrl};
